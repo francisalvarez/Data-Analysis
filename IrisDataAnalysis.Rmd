@@ -1,0 +1,273 @@
+---
+title: "Iris Dataset Analysis"
+author: "Francis Alvarez"
+date: "5/14/2018"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(cache=TRUE)
+```
+**********
+####Purpose: 
+The goal is to gain experience analyzing data sets with varying statistical and machine learning techniques. We are working with the Iris dataset. There are four different traits that are recorded for three different types of species. Each species has 50 samples for a combined total of 150 samples. For this specific data set we will focus on differences among the different species and later see if we can correctly classify each species based on the numerical attributes of the sample.
+
+*************
+
+We begin by plotting the data set to get a quick representation of the values and distribution among species. The structure of the dataset, as well as a sample header, can be seen below.   
+```{r, echo=FALSE, fig.align='center'}
+dat = iris
+str(iris)
+head(iris)
+attach(dat)
+
+#### Plotting across all four data sets.
+library(gridExtra)  # Needed when using grid.arrange to have multiple plots
+library(ggplot2)
+p1 = qplot(Species, Petal.Length, geom = "jitter", color = factor(Species)) + labs(color = "Species")
+p2 = qplot(Species, Petal.Width, geom = "jitter", color = factor(Species)) + labs(color = "Species")
+p3 = qplot(Species, Sepal.Length, geom = "jitter", color = factor(Species)) + labs(color = "Species")
+p4 = qplot(Species, Sepal.Width, geom = "jitter", color = factor(Species)) + labs(color = "Species")
+grid.arrange(p1, p2, p3, p4, ncol=2)
+```
+
+```{r, echo=FALSE}
+# #### Descriptive Stats (ALSO USED IN Z-SCORE CLASSIFICATION)
+mean_mat = matrix(0,nrow=3,ncol=4)
+sd_mat =  matrix(0,nrow=3,ncol=4)
+mean_mat[,1] =  tapply(Sepal.Length,Species,mean)
+sd_mat[,1] = tapply(Sepal.Length,Species,sd)
+mean_mat[,2] = tapply(Sepal.Width,Species,mean)
+sd_mat[,2] = tapply(Sepal.Width,Species,sd)
+mean_mat[,3] = tapply(Petal.Length,Species,mean)
+sd_mat[,3] = tapply(Petal.Length,Species,sd)
+mean_mat[,4] = tapply(Petal.Width,Species,mean)
+sd_mat[,4] = tapply(Petal.Width,Species,sd)
+
+cnames = names(iris[,1:4])
+rnames = levels(iris$Species)
+# Does the same as row names above just a little more complicated
+# t=toString(unique(iris$Species)) 
+# rnames=unlist(strsplit(t, split=", "))
+
+mean_df = as.data.frame(mean_mat)
+sd_df = as.data.frame(sd_mat)
+colnames(mean_df) = cnames
+rownames(mean_df) = rnames
+colnames(sd_df) = cnames
+rownames(sd_df) = rnames
+
+library(knitr)
+kable(mean_df, caption = "Mean Across Species")
+kable(sd_df, caption = "Standerd Deviation Across Species")
+```
+
+We want to check whether the means across each species are equal. We initially focus on petal length.\
+ANOVA F Test\
+$H_0: \mu_1=\mu_2=\mu_3$ versus $H_1: \text{not all the $\mu_j$'s are equal }$
+```{r}
+oneway.test(Petal.Length~Species)
+```
+There is significant evidence to reject that the mean petal length across each species are equal. We could continue across other traits of flowers but we now will focus on classification of species. 
+
+
+### Correlation Among Each Treatment
+
+```{r, echo=FALSE, fig.align='center'}
+# pairs(iris[,1:4], main = "Iris Data Among Species",
+#       pch = 21, bg = c("red", "green3", "blue")[unclass(iris$Species)])
+
+
+pairs(iris[,1:4], main = "Iris Data Among Species",
+      pch = 21, bg = c("red", "green3", "blue")[unclass(iris$Species)], oma=c(3,3,3,15))
+par(xpd = TRUE)
+legend("bottomright", fill = c("red", "green3", "blue"), legend = c( levels(iris$Species)))
+```
+
+From the plots above we can see the correlation among features. As a whole, petal length and petal width appear to be highly correlated, but once we look at the values as a species there is not much correlation. In certain instances, some species have high correlation for a specific two features while another species will not, for example, petal length versus sepal length. 
+
+The values below are ordered by: setosa, versicolor and virginica. 
+```{r, echo=FALSE}
+# Correlation values for each species
+cor(dat[which(dat$Species=='setosa'),1:4])
+cor(dat[which(dat$Species=='versicolor'),1:4])
+cor(dat[which(dat$Species=='virginica'),1:4])
+```
+
+
+## Species Classification 
+The next focus is being able to correctly classify each species simply by the listed four traits. We will utilize three different methods: z-score classification, k-means clustering and neural networks. 
+
+#### Classification by Z-Scores
+This method takes the data from each sample and with that data then calculates the z-score with respect to each species mean and then ranks the z-scores from lowest to highest.\
+$$\text{rank}\left(\frac{x-\mu_1}{\sigma_1},...,\frac{x-\mu_k}{\sigma_k}\right)$$
+
+This ranking is done for each trait and then totaled. The species with the lowest total is then selected. This is able to be done using up to $k$ traits.\
+
+**Concerns & Improvements:** \
+There have been no cases where a trait ties, but that may be a future concern. Additionaly, we rank each trait immediately after receiving its z-score. Another viable option is totalling all of the z-scores and then only ranking once at the end. In our results some traits may be better indicators and instead of rating orderly (1st,2nd,...) the rankings could be scaled, e.g., ranking petal length heavily since that is a strong indicator of species, especially for setosta species.  
+
+**Results:** \
+Using all four traits. 
+```{r, echo=FALSE}
+###      Function to calculate z-score
+zPredict = function(x,mean_vals,sd_vals){
+  # """x is the row vector of strictly numerically values. mean_vals, sd_vals are matrices with the columns being the trait and the row being the species."""
+  r=nrow(mean_vals)  
+  z = abs(x[rep(1,r),]-mean_vals)/sd_vals
+  mins = apply(z,2,rank)
+  ranking = rowSums(mins,2)
+  decision = which.min(ranking)
+return(unname(decision))
+}
+
+###      Classifying each value in the dataset 
+dec = rep(0,150)
+trait_amt = (1:4) # Using 4 traits
+for (ii in 1:nrow(dat)){
+  dec[ii] = zPredict(dat[ii,trait_amt],mean_mat[,trait_amt],sd_mat[,trait_amt])
+}
+
+# Table with the results. There should be 50 in each species. 
+table(dec,Species)
+```
+
+From the table above, we can see **using all four traits results in 90% accuracy (15 incorrect).**  From the earlier plots, the values with the largest difference in means appeared to be petal length and petal length and for that reason we try the same method with only those two traits. 
+
+Using two traits, petal length and petal width.
+```{r, echo=FALSE}
+dec = rep(0,150)
+trait_amt = (3:4) # Using 2 traits
+for (ii in 1:nrow(dat)){
+  dec[ii] = zPredict(dat[ii,trait_amt],mean_mat[,trait_amt],sd_mat[,trait_amt])
+}
+table(dec,Species)
+```
+
+Only utilizing those two traits allowed us to increase the **accuracy of our model up to 94.67% (8 incorrect).** 
+
+#### Classification by K-Means Clustering
+Initially, we only cluster based on the petal width and the petal length. The reason being was those two traits appeared to have the largest difference in their means among species.\
+
+**From this clustering we correctly classified 96% of the data (6 incorrect).**
+
+```{r, echo=FALSE, fig.width = 9, fig.asp = .40} 
+# out.width = '90%'}
+# Taken from:
+# https://www.r-bloggers.com/k-means-clustering-in-r/
+
+p1=qplot(Petal.Width, Petal.Length, geom = "point", color = factor(Species),main='Original Data') + labs(color = "Species")
+set.seed(20)
+## K means with TWO features : 6 incorrct results
+irisCluster = kmeans(iris[,3:4], 3, nstart=20)
+table(irisCluster$cluster, iris$Species)
+# irisCluster
+
+## Changes cluster values to their unique own factor
+irisCluster$cluster = as.factor(irisCluster$cluster)
+p2=qplot(Petal.Width, Petal.Length, geom = "point", color = factor(irisCluster$cluster),main='K-Means Clustering') + labs(color = "Species") + scale_color_hue(labels = c("setosa", "versicolor","virginica"))
+grid.arrange(p1, p2, ncol=2)
+```
+
+We now test three traits: sepal width, petal length and petal width. **The result led to a less accurate result with 95.33% correct classification (7 incorrect features).** \
+
+
+When all four traits: sepal length, sepal width, petal length and petal width, were used **the accuracy again decreased to 89.33% correct classification (16 incorrect)**
+
+A valuable takeaway is, if it is possible to visually analyze the data prior, some helpful intuition can be gained on which characteristics to use for clustering. Sometimes less is more, parsimony principle!
+
+**Thoughts:**  \
+K-means is similar to the z-score classification and performed better without the prior knowledge of each species' mean value per trait. Difficulty may arise when the data is not so disjoint, but for situations like so the method performs effectively. Additionally, if the species type data was not included we could make an educated guess of which samples originated from each species, granted we know how many different species there are . 
+
+
+#### Nueral Networks
+We fit our neural network with a (4,3,3) model with (3 being the hidden portion) as depicted below.  
+![](/Users/francisalvarez/Documents/Self Learning Folder/r_dataAnalysis/iris_dataset/irisdataset_NN.png)
+**Results:** \ 
+
+```{r, echo=FALSE}
+# https://www.r-bloggers.com/fitting-a-neural-network-in-r-neuralnet-package/
+library(neuralnet)
+library(nnet)
+library(ggplot2)
+# Convert type of flower to 1,2,3 to then create a hot vector version of it. 
+train = cbind(iris[,1:4], class.ind(as.factor(sort(rep(c(1,2,3),50))
+)))
+colnames(train)[5:7]= c("l1","l2","l3")
+
+# First normalize values to ensure quicker convergence 
+scl <- function(x){ (x - min(x))/(max(x) - min(x)) }
+train[, 1:4] <- data.frame(lapply(train[, 1:4], scl))
+
+# Set up formula, need to model as linear regression
+n <- names(train)
+f <- as.formula(paste("l1 + l2 + l3 ~", paste(n[!n %in% c("l1","l2","l3")], collapse = " + ")))
+
+nn <- neuralnet(f,
+                data = train,
+                hidden = c(3),
+                act.fct = "logistic",
+                linear.output = FALSE,
+                lifesign = "minimal")
+# # See whats going on
+# plot(nn)
+
+## Compute predictions
+pr.nn <- compute(nn, train[, 1:4])
+
+## Extract results
+pr.nn_ <- pr.nn$net.result
+#head(pr.nn_)
+
+# Accuracy (training set)
+original_values <- max.col(train[, 5:7])
+pr.nn_2 <- max.col(pr.nn_)
+print("Accuracy")
+mean(pr.nn_2 == original_values)
+```
+**We were able to achieve 98.66% accuracy in correct classification.** Out of all three models, nueral networks peformed the best and again did not need any prior knowlegde.
+
+**Concerns:** \
+The model can be overfitting the data and for that reason we could apply a 10-fold cross validation only using 95% of the data and testing the remaining 5%
+
+```{r, echo=FALSE}
+# Set seed for reproducibility purposes
+set.seed(500)
+# 10 fold cross validation
+k <- 10
+# Results from cv
+outs <- NULL
+# Train test split proportions
+proportion <- 0.95 
+
+for(i in 1:k)
+{
+  index <- sample(1:nrow(train), round(proportion*nrow(train)))
+  train_cv <- train[index, ]
+  test_cv <- train[-index, ]
+  nn_cv <- neuralnet(f,
+                     data = train_cv,
+                     hidden = c(3),
+                     act.fct = "logistic",
+                     linear.output = FALSE)
+  
+  # Compute predictions
+  pr.nn <- compute(nn_cv, test_cv[, 1:4])
+  # Extract results
+  pr.nn_ <- pr.nn$net.result
+  # Accuracy (test set)
+  original_values <- max.col(test_cv[, 5:7])
+  pr.nn_2 <- max.col(pr.nn_)
+  outs[i] <- mean(pr.nn_2 == original_values)
+}
+print("Accuracy")
+mean(outs)
+```
+Of those 10 cross validation tests, the average accuracy was 96.25%. 
+
+# Summary 
+In terms of accuracy, neural networks performed the best followed by k-cluster means and then z-score classification. For the z-score classification method some adjustments could be made that my significanlty improve the results but for a quick simple method the results were satisfactory. Other methods may be observed in the future for comparison. 
+
+
+
+
