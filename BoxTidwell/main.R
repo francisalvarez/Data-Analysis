@@ -5,6 +5,8 @@
 # 2a. Working with the boxTidwell function to check linearity in logit
 # 3. Box Tidwell example for logistic regression
 # https://github.com/kennethleungty/Logistic-Regression-Assumptions/blob/main/Box-Tidwell-Test-in-R.ipynb
+# 4. Assumption checks
+# http://www.sthda.com/english/articles/36-classification-methods-essentials/148-logistic-regression-assumptions-and-diagnostics-in-r/
 library(aod)
 library(ggplot2)
 library(car)
